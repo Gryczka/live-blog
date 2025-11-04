@@ -3,18 +3,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-
-interface Atom {
-  id: string;
-  content: string;
-  timestamp: number;
-  author?: string;
-}
+import { useLiveBlogStore, type Atom } from '@/app/store/useLiveBlogStore';
 
 export default function LiveBlogAuthor() {
   const params = useParams();
   const blogId = params?.blogId as string;
 
+  // Local form state (doesn't need to be in global store)
   const [content, setContent] = useState('');
   const [author, setAuthor] = useState('');
   const [isPublishing, setIsPublishing] = useState(false);
@@ -22,28 +17,21 @@ export default function LiveBlogAuthor() {
     type: 'success' | 'error';
     message: string;
   } | null>(null);
-  const [recentAtoms, setRecentAtoms] = useState<Atom[]>([]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Get atoms from Zustand store
+  const atoms = useLiveBlogStore((state) => state.atoms);
+  const fetchInitialAtoms = useLiveBlogStore((state) => state.fetchInitialAtoms);
+
+  // Recent atoms (top 5 from store)
+  const recentAtoms = atoms.slice(0, 5);
+
   useEffect(() => {
     if (!blogId) return;
-    fetchRecentAtoms();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blogId]);
-
-  const fetchRecentAtoms = async () => {
-    try {
-      const response = await fetch(`/api/liveblog/${blogId}/atoms`);
-      if (response.ok) {
-        const data = (await response.json()) as { atoms: Atom[] };
-        // Reverse to get newest first, then take top 5
-        setRecentAtoms((data.atoms || []).reverse().slice(0, 5));
-      }
-    } catch (error) {
-      console.error('Failed to fetch recent atoms:', error);
-    }
-  };
+    // Fetch atoms using the store
+    fetchInitialAtoms(blogId);
+  }, [blogId, fetchInitialAtoms]);
 
   const handlePublish = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,8 +69,9 @@ export default function LiveBlogAuthor() {
         // Clear the form
         setContent('');
 
-        // Add to recent atoms
-        setRecentAtoms((prev) => [data.atom, ...prev.slice(0, 4)]);
+        // The atom will be automatically added via WebSocket broadcast
+        // But we can also refetch to ensure consistency
+        fetchInitialAtoms(blogId);
 
         // Focus back on textarea
         textareaRef.current?.focus();

@@ -1,118 +1,36 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-
-interface Atom {
-  id: string;
-  content: string;
-  timestamp: number;
-  author?: string;
-}
+import { useLiveBlogStore } from '@/app/store/useLiveBlogStore';
 
 export default function LiveBlogReader() {
   const params = useParams();
   const blogId = params?.blogId as string;
 
-  const [atoms, setAtoms] = useState<Atom[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('Connecting...');
-  const wsRef = useRef<WebSocket | null>(null);
+  // Get state and actions from Zustand store
+  const atoms = useLiveBlogStore((state) => state.atoms);
+  const isConnected = useLiveBlogStore((state) => state.isConnected);
+  const connectionStatus = useLiveBlogStore((state) => state.connectionStatus);
+  const fetchInitialAtoms = useLiveBlogStore((state) => state.fetchInitialAtoms);
+  const connectWebSocket = useLiveBlogStore((state) => state.connectWebSocket);
+  const disconnectWebSocket = useLiveBlogStore((state) => state.disconnectWebSocket);
 
   useEffect(() => {
     if (!blogId) return;
 
     // Fetch initial atoms
-    fetchInitialAtoms();
+    fetchInitialAtoms(blogId);
 
     // Connect to WebSocket
-    connectWebSocket();
+    connectWebSocket(blogId);
 
     // Cleanup on unmount
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
+      disconnectWebSocket();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blogId]);
-
-  const fetchInitialAtoms = async () => {
-    try {
-      const response = await fetch(`/api/liveblog/${blogId}/atoms`);
-      if (response.ok) {
-        const data = (await response.json()) as { atoms: Atom[] };
-        // Reverse to show newest first (matches WebSocket prepend behavior)
-        setAtoms((data.atoms || []).reverse());
-      }
-    } catch (error) {
-      console.error('Failed to fetch initial atoms:', error);
-    }
-  };
-
-  const connectWebSocket = () => {
-    // Determine WebSocket protocol (ws:// or wss://)
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/liveblog/${blogId}/websocket`;
-
-    try {
-      const ws = new WebSocket(wsUrl);
-
-      ws.onopen = () => {
-        console.log('WebSocket connected');
-        setIsConnected(true);
-        setConnectionStatus('Connected - Live updates enabled');
-        // Fetch full atom list to ensure we have all atoms including any missed during disconnection
-        fetchInitialAtoms();
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          if (message.type === 'new_atom') {
-            // Add the new atom to the top of the list
-            setAtoms((prev) => [message.atom, ...prev]);
-          }
-        } catch (error) {
-          console.error('Failed to parse WebSocket message:', error);
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        // Check if we're in development mode (localhost:3000 = Next.js dev server)
-        if (window.location.port === '3000') {
-          setConnectionStatus('Development mode - WebSockets require Workers runtime');
-          setIsConnected(false);
-        } else {
-          setConnectionStatus('Connection error');
-        }
-      };
-
-      ws.onclose = (event) => {
-        console.log('WebSocket disconnected', event.code, event.reason);
-        setIsConnected(false);
-
-        // Don't attempt to reconnect if we're in dev mode or got a 426 (Upgrade Required)
-        if (window.location.port === '3000' || event.code === 1002) {
-          setConnectionStatus('Development mode - Use `npm run preview` for WebSockets');
-        } else {
-          setConnectionStatus('Disconnected - Attempting to reconnect...');
-          // Attempt to reconnect after 3 seconds
-          setTimeout(() => {
-            connectWebSocket();
-          }, 3000);
-        }
-      };
-
-      wsRef.current = ws;
-    } catch (error) {
-      console.error('Failed to create WebSocket:', error);
-      setConnectionStatus('WebSocket not available in development mode');
-      setIsConnected(false);
-    }
-  };
+  }, [blogId, fetchInitialAtoms, connectWebSocket, disconnectWebSocket]);
 
   const formatTimestamp = (timestamp: number) => {
     const date = new Date(timestamp);
